@@ -119,9 +119,12 @@ class main_window(QWidget):
 
     def on_monitor_usb_pop_signal(self, driver):
         for item in driver:
-            self.drivers.remove(item[0])
-            self.writer_success_dev_listwidget.addItem(f"{item[0]}: 烧写完成")
+            if item in self.drivers:
+                self.drivers.remove(item[0])
+                self.writer_success_dev_listwidget.addItem(f"{item[0]}: 烧写完成")
             self.curr_dev_num = self.curr_dev_num - 1
+            if self.curr_dev_num < 0:
+                self.curr_dev_num = 0
             self.status_label.setText(str(self.curr_dev_num))
     
 if __name__ == "__main__":
