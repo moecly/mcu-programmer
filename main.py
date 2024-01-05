@@ -1,133 +1,110 @@
-import os
 import sys
 from dfu import dfu
 from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
 from time import sleep
+import threading
+from monitor_usb import monitor_usb
+from PyQt5.QtGui import QFont
 
-class write_device(QThread):
-    def __init__(self, drive_letter='C'):
-        self.drive_letter = drive_letter
-        super(write_device, self).__init__()
-
-    progress_signal = pyqtSignal(str)
-    info = pyqtSignal(str)
-    finished = pyqtSignal()
+class monitor_usb_device(QThread):
+    def __init__(self):
+        self.mon_usb = monitor_usb()
+        return super(monitor_usb_device, self).__init__()
+    
+    push = pyqtSignal(list)
+    pop = pyqtSignal(list)
 
     def run(self):
-        # 用于烧录设备
-        drive_letter = self.drive_letter
-        drive = drive_letter + ':'
-        write_tool = dfu()
+        while True:
+            push_drv, pop_drv = self.mon_usb.detect_usb_event() 
+            if len(push_drv) != 0:
+                print("插入: " + str(push_drv))
+                self.push.emit(push_drv)
 
-        # 发送进度信号
-        self.progress_signal.emit("等待设备连接...")
-
-        # 执行后台任务
-        while not os.path.exists(drive):
+            if len(pop_drv) != 0:
+                print("弹出: " + str(pop_drv))
+                self.pop.emit(pop_drv)
             sleep(1)
-        
-        # 发送进度信号
-        self.progress_signal.emit("开始写入...")
-        
-        if not write_tool.write_to_device(drive_letter):
-            self.progress_signal.emit("源文件不存在")
-            self.info.emit(str(drive_letter) + " 烧写失败")
-        else:
-            self.progress_signal.emit("烧写完成!")
-            self.info.emit(str(drive_letter) + " 烧写成功")
-        self.finished.emit()
 
 class main_window(QWidget):
     def __init__(self):
         super(main_window, self).__init__()
-        self.setGeometry(100, 100, 400, 200)
+        # self.setGeometry(100, 100, 400, 200)
+        self.setFixedSize(400, 300);
         # 主layout
         self.h_box_layout = QHBoxLayout()
         self.main_layout = QVBoxLayout()
         self.main_layout.addLayout(self.h_box_layout)
         self.setLayout(self.main_layout)
 
+        # 存储driver
+        self.drivers = []
+
+
+        # 创建 QFont 对象并设置字体大小
+        programmer_push_button_font = QFont()
+        programmer_push_button_font.setPointSize(26)  # 设置字体大小为16点
+        # 烧录按钮
+        self.programmer_push_button = QPushButton()
+        self.programmer_push_button.setText("programmer")
+        self.programmer_push_button.setFont(programmer_push_button_font)
+        self.programmer_push_button.clicked.connect(self.on_programmer_push_button_clicked)
+        self.main_layout.addWidget(self.programmer_push_button)
+
         # listwidget显示识别到的设备
         self.rec_dev_listwidget = QListWidget()
         self.h_box_layout.addWidget(self.rec_dev_listwidget)
 
         # label显示状态
+        self.curr_dev_num = 0
+
+        # 创建 QFont 对象并设置字体大小
+        status_label_font = QFont()
+        status_label_font.setPointSize(46)  # 设置字体大小为16点
+        # 将 QFont 应用到 QLabel
         self.status_label = QLabel()
         self.status_label.setAlignment(Qt.AlignCenter)  # 居中对齐
         self.h_box_layout.addWidget(self.status_label)
-        self.status_label.setText("DFU")
+        self.status_label.setText(str(self.curr_dev_num))
+        self.status_label.setFont(status_label_font)
 
         # listwidget显示烧录成功的设备
         self.writer_success_dev_listwidget = QListWidget()
         self.h_box_layout.addWidget(self.writer_success_dev_listwidget)
         
+        self.monitor_usb_thread = monitor_usb_device()
+        self.monitor_usb_thread.push.connect(self.on_monitor_usb_push_signal)
+        self.monitor_usb_thread.pop.connect(self.on_monitor_usb_pop_signal)
+        self.monitor_usb_thread.start()
+        
         # 线程管理
         self.thread_manager = []
 
-        worker0 = write_device('D')
-        self.thread_manager.append(worker0)
-        worker0.info.connect(self.on_info_signal)
-        worker0.progress_signal.connect(self.on_progress_signal)
-        worker0.finished.connect(lambda: self.on_finish_signal(worker0))
-        worker0.start()
-        self.rec_dev_listwidget.addItem('D')
+    def on_programmer_push_button_clicked(self):
+        print(f"开始烧写: {self.drivers}")
+        for item in self.drivers:
+            thread = threading.Thread(target=self.write_to_device_in_thread, args=(item,))
+            thread.start()
+            self.thread_manager.append(thread)
+            self.rec_dev_listwidget.addItem(item)
+            self.curr_dev_num = self.curr_dev_num + 1
+            self.status_label.setText(str(self.curr_dev_num))
 
-        worker1 = write_device('E')
-        self.thread_manager.append(worker1)
-        worker1.info.connect(self.on_info_signal)
-        worker1.progress_signal.connect(self.on_progress_signal)
-        worker1.finished.connect(lambda: self.on_finish_signal(worker1))
-        worker1.start()
-        self.rec_dev_listwidget.addItem('E')
+    def write_to_device_in_thread(self, drive_letter):
+        dfu.write_to_device(drive_letter)
+
+    def on_monitor_usb_push_signal(self, driver):
+        for item in driver:
+            self.drivers.append(f"检测到: {item[0]}")
+
+    def on_monitor_usb_pop_signal(self, driver):
+        for item in driver:
+            self.drivers.remove(item[0])
+            self.writer_success_dev_listwidget.addItem(f"{item[0]}: 烧写完成")
+            self.curr_dev_num = self.curr_dev_num - 1
+            self.status_label.setText(str(self.curr_dev_num))
     
-    def on_finish_signal(self, worker):
-        if worker in self.thread_manager:
-            self.thread_manager.remove(worker)
-    
-    def on_progress_signal(self, message):
-        # 在这里处理进度信号，例如更新标签文本或执行其他图形化修改
-        self.status_label.setText(message)
-    
-    def on_info_signal(self, message):
-        self.writer_success_dev_listwidget.addItem(message)
-
-    # def nativeEvent(self, eventType, message):
-    #     print(message)
-    #     msg_type = message.message
-    #     if msg_type == 0x0219:  # WM_DEVICECHANGE
-    #         dev_broadcast_hdr = message.lParam
-    #         if message.wParam == 0x8000:  # DBT_DEVICEARRIVAL
-    #             if dev_broadcast_hdr.dbch_devicetype == 0x00000002:  # DBT_DEVTYP_VOLUME
-    #                 dev_broadcast_volume = dev_broadcast_hdr.cast_to('DEV_BROADCAST_VOLUME*')
-    #                 if dev_broadcast_volume.dbcv_flags == 0:
-    #                     dec_driver = self.first_drive_from_mask(dev_broadcast_volume.dbcv_unitmask)
-    #                     # 在这里启动你的线程或进行其他操作
-    #                     worker = write_device(dec_driver)
-    #                     worker_thread = QThread()
-    #                     worker.moveToThread(self.worker_thread)
-    #                     worker.finished.connect(self.worker_thread.quit)
-    #                     worker.progress_signal.connect(self.on_progress_signal)
-    #                     worker.info.connect(self.on_info_signal)
-    #                     worker_thread.finished.connect(self.worker.deleteLater)
-    #                     worker_thread.started.connect(self.worker.do_work)
-    #                     worker_thread.start()
-    #                     self.rec_dev_listwidget.addItem(dec_driver)
-    #         elif message.wParam == 0x8004:  # DBT_DEVICEREMOVECOMPLETE
-    #             if dev_broadcast_hdr.dbch_devicetype == 0x00000002:  # DBT_DEVTYP_VOLUME
-    #                 dev_broadcast_volume = dev_broadcast_hdr.cast_to('DEV_BROADCAST_VOLUME*')
-    #                 if dev_broadcast_volume.dbcv_flags == 0:
-    #                     dec_driver = self.first_drive_from_mask(dev_broadcast_volume.dbcv_unitmask)
-    #                     self.writer_success_dev_listwidget.addItem(dec_driver + " 烧写成功")
-    #     return super(main_window, self).nativeEvent(eventType, message)
-
-    # def first_drive_from_mask(self, mask):
-    #     drive = 0
-    #     while not (mask & 1):
-    #         mask >>= 1
-    #         drive += 1
-    #     return chr(ord('A') + drive)
-
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = main_window()

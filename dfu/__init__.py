@@ -1,14 +1,12 @@
 import os
-import shutil
-import ctypes
-from ctypes import wintypes
 import subprocess
 
 class dfu():
     def __init__(self):
         pass
 
-    def copy_file(self, src, dst):
+    @staticmethod
+    def copy_file(src, dst):
         # 构建复制文件的命令
         command = f'copy "{src}" "{dst}"'
 
@@ -34,14 +32,16 @@ class dfu():
         #     error_code = ctypes.get_last_error()
         #     raise WindowsError(error_code, ctypes.FormatError(error_code))
         
-    def write_to_device(self, drive_letter='C'):
-        if not self.write_app_to_device(drive_letter):
+    @classmethod
+    def write_to_device(cls, drive_letter='C'):
+        if not cls.write_app_to_device(drive_letter):
             return False
-        if not self.write_end_to_device(drive_letter):
+        if not cls.write_end_to_device(drive_letter):
             return False
         return True
 
-    def write_app_to_device(self, drive_letter='C'):
+    @classmethod
+    def write_app_to_device(cls, drive_letter='C'):
         drive = drive_letter + ':'
         src_app_file = os.path.join(os.getcwd(), 'app.bin')
         dst_app_file = os.path.join(drive, 'app.bin')
@@ -51,13 +51,14 @@ class dfu():
         
         try:
             # shutil.copyfile(src_app_file, dst_app_file)
-            self.copy_file(src_app_file, dst_app_file)
+            cls.copy_file(src_app_file, dst_app_file)
         except Exception as e:
             print(e)
             return False
         return True
 
-    def write_end_to_device(self, drive_letter='C'):
+    @classmethod
+    def write_end_to_device(cls, drive_letter='C'):
         drive = drive_letter + ':'
         src_end_file = os.path.join(os.getcwd(), 'end.txt')
         dst_end_file = os.path.join(drive, 'end.txt')
@@ -67,7 +68,7 @@ class dfu():
         
         try:
             # shutil.copyfile(src_end_file, dst_end_file)
-            self.copy_file(src_end_file, dst_end_file)
+            cls.copy_file(src_end_file, dst_end_file)
         except Exception as e:
             print(e)
             return False
